@@ -84,7 +84,7 @@ Contributions, issues, and feature requests are welcome. Feel free to check [iss
 
 ## Author
 
-Your Name - [Your GitHub Profile](https://github.com/yourusername)
+https://github.com/UPJVCRPCPO/
 
 ## Acknowledgments
 
