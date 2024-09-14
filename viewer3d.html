@@ -1,0 +1,510 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Depth Map 3D Effect with Advanced Lighting Controls</title>
+  <style>
+    body { 
+      margin: 0; 
+      font-family: Arial, sans-serif; 
+      display: flex;
+      overflow: hidden; /* Prevent scrolling on the body */
+    }
+    #controls {
+      height: 100vh;
+      background: #f0f0f0;
+      padding: 10px;
+      /* box-sizing: border-box; */
+      overflow-y: auto; /* Allow vertical scrolling */
+      /* width: 300px; Set a fixed width */
+      /* flex-shrink: 0; Prevent the controls from shrinking */
+    }
+    #resizer {
+      width: 10px;
+      height: 100vh;
+      background: #ccc;
+      cursor: ew-resize;
+      flex-shrink: 0; /* Prevent the resizer from shrinking */
+    }
+    #container {
+      flex-grow: 1;
+      height: 100vh;
+      overflow: hidden; /* Prevent scrolling in the 3D view */
+    }
+    .control-group {
+      border: 1px solid #ccc;
+      padding: 10px;
+      margin-bottom: 10px;
+      border-radius: 5px;
+    }
+    .control-group h3 {
+      margin-top: 0;
+    }
+    label {
+      display: inline-block;
+      width: 100px;
+    }
+    input[type="range"] {
+      width: 150px;
+    }
+    .light-control {
+      position: absolute;
+      font-size: 24px;
+      user-select: none;
+      cursor: move;
+    }
+  </style>
+</head>
+<body>
+  <div id="controls">
+    <div class="control-group">
+      <h3>Image Controls</h3>
+      <input type="file" id="imageInput" accept="image/*"><br>
+      <input type="file" id="depthInput" accept="image/*"><br>
+      <input type="file" id="normalInput" accept="image/*"><br>
+      <button id="loadButton">Load Images</button>
+    </div>
+    <div class="control-group">
+      <h3>Background Color</h3>
+      <input type="color" id="backgroundColorPicker" value="#000000">
+    </div>
+    <div class="control-group" id="light1Controls">
+      <h3>Light 1 Controls</h3>
+    </div>
+    <div class="control-group" id="light2Controls">
+      <h3>Light 2 Controls</h3>
+    </div>
+  </div>
+  <div id="resizer"></div>
+  <div id="container"></div>
+
+  <!-- Include three.js -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+
+  <!-- Our script -->
+  <script>
+    let scene, camera, renderer;
+    let planeMesh;
+    let imageTexture, depthTexture, normalTexture;
+    let uniforms;
+    let light1, light2;
+    let animationId;
+    let time = 0;
+
+    const lightParams = [
+      { name: 'enabled', type: 'checkbox', default: true, label: 'Enabled' },
+      { name: 'color', type: 'color', default: '#ffff00', label: 'Color' },
+      { name: 'intensity', type: 'range', min: 0, max: 2, step: 0.1, default: 1, label: 'Intensity' },
+      { name: 'x', type: 'range', min: -5, max: 5, step: 0.1, default: 0, label: 'X Position' },
+      { name: 'y', type: 'range', min: -5, max: 5, step: 0.1, default: 0, label: 'Y Position' },
+      { name: 'z', type: 'range', min: 0, max: 10, step: 0.1, default: 5, label: 'Z Position' },
+      { name: 'flickering', type: 'checkbox', default: false, label: 'Flickering' },
+      { name: 'flickerIntensity', type: 'range', min: 0, max: 1, step: 0.01, default: 0.1, label: 'Flicker Intensity' },
+      { name: 'flickerSpeed', type: 'range', min: 0.1, max: 10, step: 0.1, default: 1, label: 'Flicker Speed' },
+      { name: 'pulsing', type: 'checkbox', default: false, label: 'Pulsing' },
+      { name: 'pulseSpeed', type: 'range', min: 0.1, max: 5, step: 0.1, default: 1, label: 'Pulse Speed' },
+      { name: 'pulseMin', type: 'range', min: 0, max: 1, step: 0.05, default: 0.5, label: 'Pulse Min' },
+      { name: 'pulseMax', type: 'range', min: 0, max: 2, step: 0.05, default: 1.5, label: 'Pulse Max' },
+    ];
+
+     // Add this new function for the resizable layout
+     function initResizableLayout() {
+      const resizer = document.getElementById('resizer');
+      const leftSide = document.getElementById('controls');
+      const rightSide = document.getElementById('container');
+
+      let isResizing = false;
+
+      resizer.addEventListener('mousedown', (e) => {
+        isResizing = true;
+        document.addEventListener('mousemove', resize);
+        document.addEventListener('mouseup', stopResize);
+      });
+
+      function resize(e) {
+        if (!isResizing) return;
+        const newWidth = e.clientX;
+        leftSide.style.width = newWidth + 'px';
+        onWindowResize(); // Ensure the 3D scene adjusts to the new layout
+      }
+
+      function stopResize() {
+        isResizing = false;
+        document.removeEventListener('mousemove', resize);
+      }
+    }
+
+    window.addEventListener('DOMContentLoaded', init);
+
+    function init() {
+      initResizableLayout();
+
+      scene = new THREE.Scene();
+      camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 1, 1000);
+      camera.position.z = 5;
+
+      renderer = new THREE.WebGLRenderer({ antialias: true });
+      renderer.setSize(window.innerWidth, window.innerHeight);
+      document.getElementById('container').appendChild(renderer.domElement);
+
+      // Add background color picker event listener
+      const backgroundColorPicker = document.getElementById('backgroundColorPicker');
+      backgroundColorPicker.addEventListener('input', function() {
+        scene.background = new THREE.Color(this.value);
+      });
+
+      // Add lights
+      light1 = createLight(1);
+      light2 = createLight(2);
+
+      createLightControls('light1Controls', light1);
+      createLightControls('light2Controls', light2);
+
+      window.addEventListener('resize', onWindowResize, false);
+      document.addEventListener('mousemove', onDocumentMouseMove, false);
+      document.getElementById('loadButton').addEventListener('click', loadImages, false);
+
+     
+      // Start animation loop
+      animate();
+    }
+
+    function createLight(index) {
+      const light = new THREE.PointLight(0xffffff, 1, 100);
+      light.position.set(index === 1 ? -2 : 2, index === 1 ? 2 : -2, 5);
+      scene.add(light);
+      
+      // Add custom properties
+      light.userData = {};
+      lightParams.forEach(param => {
+        light.userData[param.name] = param.default;
+      });
+
+      return light;
+    }
+
+    function createLightControls(containerId, light) {
+      const container = document.getElementById(containerId);
+      lightParams.forEach(param => {
+        const label = document.createElement('label');
+        label.textContent = param.label;
+        container.appendChild(label);
+
+        let input;
+        if (param.type === 'checkbox') {
+          input = document.createElement('input');
+          input.type = 'checkbox';
+          input.checked = param.default;
+        } else if (param.type === 'color') {
+          input = document.createElement('input');
+          input.type = 'color';
+          input.value = param.default;
+        } else if (param.type === 'range') {
+          input = document.createElement('input');
+          input.type = 'range';
+          input.min = param.min;
+          input.max = param.max;
+          input.step = param.step;
+          input.value = param.default;
+        }
+
+        input.id = `${containerId}-${param.name}`;
+        container.appendChild(input);
+        container.appendChild(document.createElement('br'));
+
+        input.addEventListener('input', () => {
+          if (param.type === 'checkbox') {
+            light.userData[param.name] = input.checked;
+          } else if (param.type === 'color') {
+            light.userData[param.name] = input.value;
+            light.color.setHex(input.value.replace('#', '0x'));
+          } else if (param.type === 'range') {
+            light.userData[param.name] = parseFloat(input.value);
+            if (['x', 'y', 'z'].includes(param.name)) {
+              light.position[param.name] = parseFloat(input.value);
+            }
+          }
+        });
+      });
+    }
+
+    function makeDraggable(element, light) {
+      let isDragging = false;
+      let startX, startY;
+
+      element.addEventListener('mousedown', (e) => {
+        isDragging = true;
+        startX = e.clientX - parseInt(element.style.left || 0);
+        startY = e.clientY - parseInt(element.style.top || 0);
+      });
+
+      document.addEventListener('mousemove', (e) => {
+        if (isDragging) {
+          let left = e.clientX - startX;
+          let top = e.clientY - startY;
+          element.style.left = left + 'px';
+          element.style.top = top + 'px';
+
+          // Update light position
+          let x = (left / window.innerWidth) * 10 - 5;
+          let y = -((top / window.innerHeight) * 10 - 5);
+          light.position.set(x, y, light.position.z);
+
+          // Update UI sliders
+          document.getElementById(`${element.id}Controls-x`).value = x;
+          document.getElementById(`${element.id}Controls-y`).value = y;
+        }
+      });
+
+      document.addEventListener('mouseup', () => {
+        isDragging = false;
+      });
+    }
+
+    function loadImages() {
+      let imageInput = document.getElementById('imageInput');
+      let depthInput = document.getElementById('depthInput');
+      let normalInput = document.getElementById('normalInput');
+
+      if (imageInput.files.length === 0 || depthInput.files.length === 0) {
+        alert('Please select both an image and a depth map.');
+        return;
+      }
+
+      let imageFile = imageInput.files[0];
+      let depthFile = depthInput.files[0];
+      let normalFile = normalInput.files.length > 0 ? normalInput.files[0] : null;
+
+      let imageReader = new FileReader();
+      let depthReader = new FileReader();
+      let normalReader = new FileReader();
+
+      imageReader.onload = function (e) {
+        let img = new Image();
+        img.onload = function () {
+          imageTexture = new THREE.Texture(img);
+          imageTexture.needsUpdate = true;
+          textureLoaded(img.width / img.height);
+        };
+        img.src = e.target.result;
+      };
+      depthReader.onload = function (e) {
+        let img = new Image();
+        img.onload = function () {
+          depthTexture = new THREE.Texture(img);
+          depthTexture.needsUpdate = true;
+          textureLoaded();
+        };
+        img.src = e.target.result;
+      };
+      if (normalFile) {
+        normalReader.onload = function (e) {
+          let img = new Image();
+          img.onload = function () {
+            normalTexture = new THREE.Texture(img);
+            normalTexture.needsUpdate = true;
+            textureLoaded();
+          };
+          img.src = e.target.result;
+        };
+        normalReader.readAsDataURL(normalFile);
+      }
+
+      let texturesLoaded = 0;
+      let aspectRatio;
+      function textureLoaded(ratio) {
+        texturesLoaded++;
+        if (ratio) aspectRatio = ratio;
+        if (texturesLoaded === (normalFile ? 3 : 2)) {
+          createPlane(aspectRatio);
+        }
+      }
+
+      imageReader.readAsDataURL(imageFile);
+      depthReader.readAsDataURL(depthFile);
+    }
+
+    function createPlane(aspectRatio) {
+      if (planeMesh) {
+        scene.remove(planeMesh);
+        planeMesh.geometry.dispose();
+        planeMesh.material.dispose();
+      }
+
+      let width = 2;
+      let height = 2 / aspectRatio;
+      let geometry = new THREE.PlaneBufferGeometry(width, height, 256, 256);
+
+      uniforms = {
+        u_image: { value: imageTexture },
+        u_depth: { value: depthTexture },
+        u_normal: { value: normalTexture },
+        u_useNormalMap: { value: !!normalTexture },
+        u_mouse: { value: new THREE.Vector2(0.5, 0.5) },
+        u_resolution: { value: new THREE.Vector2(window.innerWidth, window.innerHeight) },
+        u_aspectRatio: { value: aspectRatio },
+        u_time: { value: 0 },
+        u_light1Pos: { value: light1.position },
+        u_light2Pos: { value: light2.position },
+        u_light1Color: { value: new THREE.Color(light1.color) },
+        u_light2Color: { value: new THREE.Color(light2.color) },
+        u_light1Intensity: { value: light1.intensity },
+        u_light2Intensity: { value: light2.intensity },
+        u_light1Enabled: { value: light1.userData.enabled },
+        u_light2Enabled: { value: light2.userData.enabled }
+      };
+
+      let material = new THREE.ShaderMaterial({
+        uniforms: uniforms,
+        vertexShader: vertexShader(),
+        fragmentShader: fragmentShader(),
+        side: THREE.DoubleSide
+      });
+
+      planeMesh = new THREE.Mesh(geometry, material);
+      scene.add(planeMesh);
+
+      camera.position.z = Math.max(width, height) * 1.5;
+    }
+
+    function animate() {
+      animationId = requestAnimationFrame(animate);
+      
+      time += 0.016; // Approximately 60 FPS
+
+      if (uniforms) {
+        uniforms.u_time.value = time;
+        updateLightUniforms(light1, 'u_light1');
+        updateLightUniforms(light2, 'u_light2');
+      }
+
+      renderer.render(scene, camera);
+    }
+
+    function updateLightUniforms(light, prefix) {
+      uniforms[`${prefix}Pos`].value = light.position;
+      uniforms[`${prefix}Color`].value = new THREE.Color(light.color);
+      uniforms[`${prefix}Enabled`].value = light.userData.enabled;
+
+      let intensity = light.userData.intensity;
+
+      if (light.userData.flickering) {
+        intensity *= 1 + (Math.random() - 0.5) * light.userData.flickerIntensity * 2;
+      }
+
+      if (light.userData.pulsing) {
+        const pulseValue = (Math.sin(time * light.userData.pulseSpeed) + 1) / 2; // 0 to 1
+        intensity *= light.userData.pulseMin + (light.userData.pulseMax - light.userData.pulseMin) * pulseValue;
+      }
+
+      uniforms[`${prefix}Intensity`].value = intensity;
+    }
+
+    // Modify the onWindowResize function to account for the new layout
+    function onWindowResize() {
+      const containerWidth = document.getElementById('container').offsetWidth;
+      const containerHeight = window.innerHeight;
+
+      camera.aspect = containerWidth / containerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(containerWidth, containerHeight);
+      if (uniforms) {
+        uniforms.u_resolution.value.set(containerWidth, containerHeight);
+      }
+    }
+
+    function onDocumentMouseMove(event) {
+      if (uniforms) {
+        uniforms.u_mouse.value.x = event.clientX / window.innerWidth;
+        uniforms.u_mouse.value.y = 1.0 - event.clientY / window.innerHeight;
+      }
+    }
+
+    function vertexShader() {
+      return `
+        uniform sampler2D u_depth;
+        uniform vec2 u_mouse;
+        uniform float u_aspectRatio;
+        varying vec2 vUv;
+        varying vec3 vNormal;
+        varying vec3 vPosition;
+
+        void main() {
+          vUv = uv;
+          vNormal = normal;
+
+          vec4 depth = texture2D(u_depth, uv);
+          float height = depth.r;
+
+          vec3 newPosition = position + normal * height * 0.5;
+
+          float parallaxX = (u_mouse.x - 0.5) * 0.2;
+          float parallaxY = (u_mouse.y - 0.5) * 0.2;
+          newPosition.x += parallaxX * (1.0 - height);
+          newPosition.y += parallaxY * (1.0 - height) * u_aspectRatio;
+
+          vPosition = newPosition;
+          gl_Position = projectionMatrix * modelViewMatrix * vec4(newPosition, 1.0);
+        }
+      `;
+    }
+
+function fragmentShader() {
+  return `
+    uniform sampler2D u_image;
+    uniform sampler2D u_depth;
+    uniform sampler2D u_normal;
+    uniform bool u_useNormalMap;
+    uniform vec2 u_resolution;
+    uniform vec3 u_light1Pos;
+    uniform vec3 u_light2Pos;
+    uniform vec3 u_light1Color;
+    uniform vec3 u_light2Color;
+    uniform float u_light1Intensity;
+    uniform float u_light2Intensity;
+    uniform bool u_light1Enabled;
+    uniform bool u_light2Enabled;
+    varying vec2 vUv;
+    varying vec3 vNormal;
+    varying vec3 vPosition;
+
+    vec3 calculateNormal(vec2 uv) {
+          vec2 texelSize = 1.0 / u_resolution;
+          float left = texture2D(u_depth, uv - vec2(texelSize.x, 0.0)).r;
+          float right = texture2D(u_depth, uv + vec2(texelSize.x, 0.0)).r;
+          float top = texture2D(u_depth, uv + vec2(0.0, texelSize.y)).r;
+          float bottom = texture2D(u_depth, uv - vec2(0.0, texelSize.y)).r;
+          return normalize(vec3(left - right, bottom - top, 0.1));
+        }
+
+    void main() {
+      vec4 color = texture2D(u_image, vUv);
+      vec3 normal;
+      
+      if (u_useNormalMap) {
+        normal = texture2D(u_normal, vUv).rgb * 2.0 - 1.0;
+      } else {
+        normal = calculateNormal(vUv);
+      }
+
+      // Calculate lighting
+      vec3 light1Dir = normalize(u_light1Pos - vPosition);
+      vec3 light2Dir = normalize(u_light2Pos - vPosition);
+      
+      float light1Intensity = u_light1Enabled ? max(dot(normal, light1Dir), 0.0) * u_light1Intensity : 0.0;
+      float light2Intensity = u_light2Enabled ? max(dot(normal, light2Dir), 0.0) * u_light2Intensity : 0.0;
+      
+      vec3 ambient = vec3(0.2);
+      vec3 diffuse1 = u_light1Color * light1Intensity;
+      vec3 diffuse2 = u_light2Color * light2Intensity;
+      
+      vec3 finalColor = color.rgb * (ambient + diffuse1 + diffuse2);
+      
+      // Use color.a to blend with the background
+      gl_FragColor = vec4(finalColor, color.a);
+    }
+  `;
+}
+  </script>
+</body>
+</html>
