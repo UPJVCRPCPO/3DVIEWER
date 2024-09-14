@@ -80,8 +80,7 @@ This project is open source and available under the [MIT License](LICENSE).
 
 ## Contributing
 
-Contributions, issues, and feature requests are welcome. Feel free to check [issues page](https://github.com/yourusername/depth-map-3d-effect/issues) if you want to contribute.
-
+Contributions, issues, and feature requests are welcome.
 ## Author
 
 https://github.com/UPJVCRPCPO/
