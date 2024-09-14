@@ -38,7 +38,7 @@ This project leverages several advanced computer graphics techniques:
 
 1. Clone this repository:
    ```
-   git clone https://github.com/yourusername/depth-map-3d-effect.git
+   git clone https://github.com/UPJVCRPCPO/3DVIEWER.git
    ```
 
 2. Open the `index.html` file in a modern web browser.
